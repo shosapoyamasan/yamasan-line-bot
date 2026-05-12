@@ -1,0 +1,6 @@
+flask
+requests
+anthropic
+python-dotenv
+schedule
+gunicorn
