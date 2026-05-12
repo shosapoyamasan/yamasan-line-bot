@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: yamasan-line-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers=1 --timeout=120 line_bot:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
