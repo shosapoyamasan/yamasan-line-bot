@@ -283,12 +283,12 @@ def run_scheduler():
         time.sleep(60)
 
 
+# gunicornでも動くようにモジュールレベルでスケジューラーを起動
+scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+scheduler_thread.start()
+print("=== やまさんLINE Bot起動 ===")
+print("朝8時30分・夕方17時に問いかけを送信します")
+
 if __name__ == "__main__":
-    print("=== やまさんLINE Bot起動 ===")
-    print("朝8時30分・夕方17時に問いかけを送信します")
-
-    # スケジューラーを別スレッドで起動
-    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
-
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False)
