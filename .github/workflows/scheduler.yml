@@ -1,0 +1,28 @@
+name: LINE Bot Scheduler
+
+on:
+  schedule:
+    # 毎朝8:30 JST (23:30 UTC)
+    - cron: '30 23 * * *'
+    # 毎夕17:00 JST (08:00 UTC)
+    - cron: '0 8 * * *'
+    # サーバーを起こしておく (10分ごと)
+    - cron: '*/10 * * * *'
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake up server
+        run: |
+          curl -s --max-time 60 "https://yamasan-line-bot.onrender.com/webhook" || true
+
+      - name: Send daily prompt (morning 8:30 JST)
+        if: github.event.schedule == '30 23 * * *'
+        run: |
+          curl -s --max-time 60 "https://yamasan-line-bot.onrender.com/ask" || true
+
+      - name: Send daily prompt (evening 17:00 JST)
+        if: github.event.schedule == '0 8 * * *'
+        run: |
+          curl -s --max-time 60 "https://yamasan-line-bot.onrender.com/ask" || true
