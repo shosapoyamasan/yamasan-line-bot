@@ -108,7 +108,7 @@ def download_line_image(message_id: str) -> str:
     image_b64 = base64.b64encode(res.content).decode("utf-8")
     imgbb_res = requests.post(
         "https://api.imgbb.com/1/upload",
-        data={"key": "2b29ca642d4f9c7e6e3db9e1e6e2a9b8", "image": image_b64}
+        data={"key": os.getenv("IMGBB_API_KEY", "da96db4d1b87398aeddabec81ab6d498"), "image": image_b64}
     )
     if imgbb_res.status_code == 200:
         url = imgbb_res.json()["data"]["url"]
