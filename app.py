@@ -11,9 +11,6 @@
 
 import os
 import json
-import schedule
-import time
-import threading
 import requests
 import anthropic
 from flask import Flask, request, Response
@@ -274,20 +271,8 @@ def handle_message(text: str):
     send_line_message("「今日の活動を教えてください」と聞いたときに返信してください😊")
 
 
-def run_scheduler():
-    """スケジューラーを別スレッドで実行"""
-    schedule.every().day.at("08:30").do(ask_yamasan)
-    schedule.every().day.at("17:00").do(ask_yamasan)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-
-
-# gunicornでも動くようにモジュールレベルでスケジューラーを起動
-scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-scheduler_thread.start()
 print("=== やまさんLINE Bot起動 ===")
-print("朝8時30分・夕方17時に問いかけを送信します")
+print("スケジュールはGitHub Actionsが管理します")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
