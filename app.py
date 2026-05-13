@@ -267,8 +267,14 @@ def handle_message(text: str):
             send_line_message(f"【修正された投稿文】\n\n{caption}\n\n---\n「OK」で投稿、「修正して→○○」でさらに修正")
         return
 
-    # その他のメッセージ
-    send_line_message("「今日の活動を教えてください」と聞いたときに返信してください😊")
+    # その他のメッセージ → そのままメモとして投稿文を生成
+    state["current_memo"] = text
+    send_line_message("投稿文を生成中です...少し待ってください📝")
+    caption = generate_post_text(text)
+    state["current_caption"] = caption
+    state["waiting_for_image"] = True
+    state["waiting_for_ok"] = False
+    send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n写真をLINEで送ってください📸\n「もう一度」で再生成、「修正して→○○」で修正できます")
 
 
 print("=== やまさんLINE Bot起動 ===")
