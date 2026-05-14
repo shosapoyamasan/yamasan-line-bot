@@ -15,6 +15,7 @@ import requests
 import anthropic
 from flask import Flask, request, Response
 from dotenv import load_dotenv
+# scheduleとthreadingは不要（GitHub Actionsでスケジュール管理）
 
 load_dotenv()
 
