@@ -253,6 +253,16 @@ def handle_message(text: str):
     """やまさんからのメッセージを処理"""
     print(f"受信: {text}")
 
+    # リセットコマンド（最優先・どの状態でも最初に戻る）
+    if text in ["リセット", "やめる", "キャンセル", "最初から"]:
+        state["waiting_for_memo"] = False
+        state["waiting_for_image"] = False
+        state["waiting_for_ok"] = False
+        state["current_caption"] = ""
+        state["current_memo"] = ""
+        send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+        return
+
     # メモ待ちの場合 → 投稿文を生成
     if state["waiting_for_memo"]:
         state["waiting_for_memo"] = False
@@ -261,17 +271,7 @@ def handle_message(text: str):
         caption = generate_post_text(text)
         state["current_caption"] = caption
         state["waiting_for_image"] = True
-        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n画像のURLを送ってください\n（ImgBBなどで公開したURLを貼り付けてください）")
-        return
-
-    # リセットコマンド（どの状態からでも最初に戻る）
-    if text in ["リセット", "やめる", "キャンセル", "最初から"]:
-        state["waiting_for_memo"] = False
-        state["waiting_for_image"] = False
-        state["waiting_for_ok"] = False
-        state["current_caption"] = ""
-        state["current_memo"] = ""
-        send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n写真をLINEで送ってください📸\n「もう一度」で再生成、「修正して→○○」で修正できます")
         return
 
     # 画像URL待ちの場合
