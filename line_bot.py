@@ -264,6 +264,16 @@ def handle_message(text: str):
         send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n画像のURLを送ってください\n（ImgBBなどで公開したURLを貼り付けてください）")
         return
 
+    # リセットコマンド（どの状態からでも最初に戻る）
+    if text in ["リセット", "やめる", "キャンセル", "最初から"]:
+        state["waiting_for_memo"] = False
+        state["waiting_for_image"] = False
+        state["waiting_for_ok"] = False
+        state["current_caption"] = ""
+        state["current_memo"] = ""
+        send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+        return
+
     # 画像URL待ちの場合
     if state["waiting_for_image"]:
         if text in ["もう一度", "再生成", "やり直し"]:
