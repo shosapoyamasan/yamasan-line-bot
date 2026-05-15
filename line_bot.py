@@ -16,6 +16,7 @@ import time
 import threading
 import requests
 import anthropic
+from datetime import datetime
 from flask import Flask, request, Response
 from dotenv import load_dotenv
 
@@ -33,11 +34,12 @@ app = Flask(__name__)
 
 # 会話の状態管理
 state = {
-    "waiting_for_memo": False,      # メモ待ち
-    "waiting_for_image": False,     # 画像URL待ち
-    "waiting_for_ok": False,        # OK待ち
-    "current_caption": "",          # 生成した投稿文
-    "current_memo": "",             # やまさんのメモ
+    "waiting_for_memo": False,
+    "waiting_for_image": False,
+    "waiting_for_ok": False,
+    "current_caption": "",
+    "current_memo": "",
+    "last_post_time": None,         # 最後にInstagram投稿した時刻
 }
 
 
@@ -263,6 +265,7 @@ def handle_message(text: str):
             send_line_message("投稿中です...📸")
             error_msg = post_to_instagram(state["current_image_url"], state["current_caption"])
             if not error_msg:
+                state["last_post_time"] = datetime.now()
                 send_line_message("✅ Instagramへの投稿が完了しました！")
             else:
                 send_line_message(f"❌ 投稿に失敗しました。\nエラー内容：{error_msg}")
@@ -279,14 +282,29 @@ def handle_message(text: str):
             send_line_message(f"【修正された投稿文】\n\n{caption}\n\n---\n「OK」で投稿、「修正して→○○」でさらに修正")
         return
 
-    # その他のメッセージ
-    send_line_message("「今日の活動を教えてください」と聞いたときに返信してください😊")
+    # その他のメッセージ → いつでもメモとして受け付ける
+    state["waiting_for_memo"] = False
+    state["current_memo"] = text
+    send_line_message("投稿文を生成中です...少し待ってください📝")
+    caption = generate_post_text(text)
+    state["current_caption"] = caption
+    state["waiting_for_image"] = True
+    send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n写真をLINEで送ってください📸\n「もう一度」で再生成、「修正して→○○」で修正できます")
+
+
+def check_and_remind():
+    """最後の投稿から10時間経過していたら問いかけを送る"""
+    last = state.get("last_post_time")
+    if last is None:
+        return
+    hours_since = (datetime.now() - last).total_seconds() / 3600
+    if hours_since >= 10:
+        ask_yamasan()
 
 
 def run_scheduler():
-    """スケジューラーを別スレッドで実行"""
-    schedule.every().day.at("08:30").do(ask_yamasan)
-    schedule.every().day.at("17:00").do(ask_yamasan)
+    """30分ごとに投稿間隔をチェック"""
+    schedule.every(30).minutes.do(check_and_remind)
     while True:
         schedule.run_pending()
         time.sleep(60)
