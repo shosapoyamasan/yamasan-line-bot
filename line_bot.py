@@ -27,6 +27,7 @@ IG_ACCESS_TOKEN = os.getenv("IG_ACCESS_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID", "Ubacd4253590620330be7e9dc117d446b")
+IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
 
 app = Flask(__name__)
 
@@ -108,7 +109,7 @@ def download_line_image(message_id: str) -> str:
     image_b64 = base64.b64encode(res.content).decode("utf-8")
     imgbb_res = requests.post(
         "https://api.imgbb.com/1/upload",
-        data={"key": "2b29ca642d4f9c7e6e3db9e1e6e2a9b8", "image": image_b64}
+        data={"key": IMGBB_API_KEY, "image": image_b64}
     )
     if imgbb_res.status_code == 200:
         url = imgbb_res.json()["data"]["url"]
@@ -133,27 +134,37 @@ def revise_post_text(current_caption: str, instruction: str) -> str:
     return message.content[0].text
 
 
-def post_to_instagram(image_url: str, caption: str) -> bool:
-    """Instagramに投稿"""
+def post_to_instagram(image_url: str, caption: str) -> str:
+    """Instagramに投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
     base_url = f"https://graph.instagram.com/v21.0/{IG_USER_ID}"
     try:
         container_res = requests.post(
             f"{base_url}/media",
             data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN}
         )
-        container_res.raise_for_status()
+        if not container_res.ok:
+            error_detail = container_res.json().get("error", {})
+            msg = error_detail.get("message", container_res.text)
+            print(f"❌ コンテナ作成失敗: {msg}")
+            return msg
+
         container_id = container_res.json()["id"]
 
         publish_res = requests.post(
             f"{base_url}/media_publish",
             data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN}
         )
-        publish_res.raise_for_status()
+        if not publish_res.ok:
+            error_detail = publish_res.json().get("error", {})
+            msg = error_detail.get("message", publish_res.text)
+            print(f"❌ 投稿公開失敗: {msg}")
+            return msg
+
         print(f"✅ Instagram投稿完了: {publish_res.json()['id']}")
-        return True
+        return ""
     except Exception as e:
         print(f"❌ Instagram投稿エラー: {e}")
-        return False
+        return str(e)
 
 
 def ask_yamasan():
@@ -252,11 +263,11 @@ def handle_message(text: str):
         if text.upper() in ["OK", "ＯＫ", "ok", "おけ", "オケ"]:
             state["waiting_for_ok"] = False
             send_line_message("投稿中です...📸")
-            success = post_to_instagram(state["current_image_url"], state["current_caption"])
-            if success:
+            error_msg = post_to_instagram(state["current_image_url"], state["current_caption"])
+            if not error_msg:
                 send_line_message("✅ Instagramへの投稿が完了しました！")
             else:
-                send_line_message("❌ 投稿に失敗しました。もう一度試してください")
+                send_line_message(f"❌ 投稿に失敗しました。\nエラー内容：{error_msg}")
         elif text in ["もう一度", "再生成", "やり直し"]:
             send_line_message("投稿文を再生成中です...")
             caption = generate_post_text(state["current_memo"])
