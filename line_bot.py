@@ -134,36 +134,34 @@ def revise_post_text(current_caption: str, instruction: str) -> str:
     return message.content[0].text
 
 
+MAKE_WEBHOOK_URL = "https://hook.us2.make.com/1gapcfs998uqcn3ypflv8jlsk9to5ktv"
+
 def post_to_instagram(image_url: str, caption: str) -> str:
-    """Instagramに投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
-    base_url = f"https://graph.instagram.com/v21.0/{IG_USER_ID}"
+    """Make.com経由でInstagramに投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
     try:
-        container_res = requests.post(
-            f"{base_url}/media",
-            data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN}
+        res = requests.post(
+            MAKE_WEBHOOK_URL,
+            json={
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": IG_ACCESS_TOKEN
+            },
+            timeout=30
         )
-        if not container_res.ok:
-            error_detail = container_res.json().get("error", {})
-            msg = error_detail.get("message", container_res.text)
-            print(f"❌ コンテナ作成失敗: {msg}")
-            return msg
-
-        container_id = container_res.json()["id"]
-
-        publish_res = requests.post(
-            f"{base_url}/media_publish",
-            data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN}
-        )
-        if not publish_res.ok:
-            error_detail = publish_res.json().get("error", {})
-            msg = error_detail.get("message", publish_res.text)
-            print(f"❌ 投稿公開失敗: {msg}")
-            return msg
-
-        print(f"✅ Instagram投稿完了: {publish_res.json()['id']}")
-        return ""
+        if res.ok:
+            data = res.json() if res.text else {}
+            if data.get("error"):
+                msg = data["error"]
+                print(f"❌ Make.com Instagram投稿失敗: {msg}")
+                return msg
+            print(f"✅ Make.com経由でInstagram投稿完了")
+            return ""
+        else:
+            msg = res.text[:200]
+            print(f"❌ Make.com呼び出し失敗: {res.status_code} {msg}")
+            return f"Make.comエラー({res.status_code}): {msg}"
     except Exception as e:
-        print(f"❌ Instagram投稿エラー: {e}")
+        print(f"❌ Make.com呼び出しエラー: {e}")
         return str(e)
 
 
