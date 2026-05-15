@@ -62,10 +62,7 @@ def send_line_message(text: str):
     return res
 
 
-def generate_post_text(memo: str) -> str:
-    """AIで投稿文を生成"""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    system_prompt = """あなたはやまさん（山崎清治）のSNS投稿文を作成するアシスタントです。
+SYSTEM_PROMPT = """あなたはやまさん（山崎清治）のSNS投稿文を作成するアシスタントです。
 
 やまさんのプロフィール：
 - 教育・啓発活動の専門家・講演者
@@ -85,11 +82,39 @@ def generate_post_text(memo: str) -> str:
 - 末尾に関連するハッシュタグを5〜8個つける（#SHOSAPO を必ず含める、#ショサポや#シャオサポは絶対に使わない）
 - 「臭い」「いきってる」と感じるような表現は使わない"""
 
+
+def generate_post_text(memo: str) -> str:
+    """テキストメモからAIで投稿文を生成"""
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=system_prompt,
+        system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": f"以下のメモをもとにInstagram投稿文を作成してください：\n\n{memo}"}]
+    )
+    return message.content[0].text
+
+
+def generate_post_text_from_image(image_url: str) -> str:
+    """写真の内容からAIで投稿文を生成（画像認識）"""
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "url", "url": image_url}
+                },
+                {
+                    "type": "text",
+                    "text": "この写真の内容をもとに、やまさんのInstagram投稿文を作成してください。写真から読み取れる場所・状況・雰囲気を活かして書いてください。"
+                }
+            ]
+        }]
     )
     return message.content[0].text
 
@@ -196,17 +221,28 @@ def webhook():
                 if event["message"]["type"] == "text":
                     text = event["message"]["text"].strip()
                     handle_message(text)
-                elif event["message"]["type"] == "image" and state["waiting_for_image"]:
+                elif event["message"]["type"] == "image":
                     message_id = event["message"]["id"]
                     send_line_message("画像を受信しました！アップロード中...📤")
                     image_url = download_line_image(message_id)
-                    if image_url:
+                    if not image_url:
+                        send_line_message("画像のアップロードに失敗しました。もう一度送ってください")
+                    elif state["waiting_for_image"]:
+                        # テキストメモ済みで写真待ちの場合
                         state["waiting_for_image"] = False
                         state["current_image_url"] = image_url
                         state["waiting_for_ok"] = True
                         send_line_message(f"アップロード完了！\n\nこの内容でInstagramに投稿しますか？\n「OK」で投稿、「もう一度」で文章を再生成します")
                     else:
-                        send_line_message("画像のアップロードに失敗しました。もう一度送ってください")
+                        # 写真だけ送ってきた場合 → 画像認識でキャプション生成
+                        send_line_message("写真から投稿文を生成中です...少し待ってください📝")
+                        caption = generate_post_text_from_image(image_url)
+                        state["current_caption"] = caption
+                        state["current_memo"] = ""
+                        state["current_image_url"] = image_url
+                        state["waiting_for_image"] = False
+                        state["waiting_for_ok"] = True
+                        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\nこの内容でInstagramに投稿しますか？\n「OK」で投稿、「もう一度」で再生成、「修正して→○○」で修正できます")
     except Exception as e:
         print(f"エラー: {e}")
 
