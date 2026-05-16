@@ -161,37 +161,42 @@ def revise_post_text(current_caption: str, instruction: str) -> str:
     return message.content[0].text
 
 
-MAKE_WEBHOOK_URL = "https://hook.us2.make.com/1gapcfs998uqcn3ypflv8jlsk9to5ktv"
-
 def post_to_instagram(image_url: str, caption: str) -> str:
-    """Make.com経由でInstagramに投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
+    """Instagram APIに直接投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
+    base_url = f"https://graph.instagram.com/v21.0/{IG_USER_ID}"
     try:
-        res = requests.post(
-            MAKE_WEBHOOK_URL,
-            json={
-                "image_url": image_url,
-                "caption": caption,
-                "access_token": IG_ACCESS_TOKEN
-            },
+        # Step1: メディアコンテナ作成
+        res1 = requests.post(
+            f"{base_url}/media",
+            params={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN},
             timeout=30
         )
-        if res.ok:
-            try:
-                data = res.json() if res.text.strip() else {}
-            except Exception:
-                data = {}
-            if data.get("error"):
-                msg = data["error"]
-                print(f"❌ Make.com Instagram投稿失敗: {msg}")
-                return msg
-            print(f"✅ Make.com経由でInstagram投稿完了")
-            return ""
-        else:
-            msg = res.text[:200]
-            print(f"❌ Make.com呼び出し失敗: {res.status_code} {msg}")
-            return f"Make.comエラー({res.status_code}): {msg}"
+        if not res1.ok:
+            err = res1.json().get("error", {})
+            msg = err.get("message", res1.text[:200])
+            print(f"❌ コンテナ作成失敗: {msg}")
+            return msg
+
+        container_id = res1.json().get("id")
+        if not container_id:
+            return f"コンテナIDが取得できませんでした: {res1.text[:200]}"
+
+        # Step2: 投稿公開
+        res2 = requests.post(
+            f"{base_url}/media_publish",
+            params={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
+            timeout=30
+        )
+        if not res2.ok:
+            err = res2.json().get("error", {})
+            msg = err.get("message", res2.text[:200])
+            print(f"❌ 公開失敗: {msg}")
+            return msg
+
+        print(f"✅ Instagram投稿完了: {res2.json().get('id')}")
+        return ""
     except Exception as e:
-        print(f"❌ Make.com呼び出しエラー: {e}")
+        print(f"❌ Instagram投稿エラー: {e}")
         return str(e)
 
 
