@@ -208,6 +208,17 @@ def trigger_ask():
     return Response("問いかけ送信完了", status=200)
 
 
+@app.route("/reset", methods=["GET"])
+def reset_state():
+    state["waiting_for_memo"] = False
+    state["waiting_for_image"] = False
+    state["waiting_for_ok"] = False
+    state["current_caption"] = ""
+    state["current_memo"] = ""
+    send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+    return Response("リセット完了", status=200)
+
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
