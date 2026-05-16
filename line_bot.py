@@ -176,7 +176,10 @@ def post_to_instagram(image_url: str, caption: str) -> str:
             timeout=30
         )
         if res.ok:
-            data = res.json() if res.text else {}
+            try:
+                data = res.json() if res.text.strip() else {}
+            except Exception:
+                data = {}
             if data.get("error"):
                 msg = data["error"]
                 print(f"❌ Make.com Instagram投稿失敗: {msg}")
