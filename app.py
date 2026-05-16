@@ -287,6 +287,25 @@ def handle_message(text: str):
     """やまさんからのメッセージを処理"""
     print(f"受信: {text}")
 
+    # OKコマンド（画像とキャプションがあればどの状態でも投稿）
+    if text.upper() in ["OK", "ＯＫ", "ok", "おけ", "オケ"]:
+        if state.get("current_image_url") and state.get("current_caption"):
+            state["waiting_for_ok"] = False
+            state["waiting_for_image"] = False
+            send_line_message("投稿中です...📸")
+            error_msg = post_to_instagram(state["current_image_url"], state["current_caption"])
+            if not error_msg:
+                state["last_post_time"] = datetime.now()
+                state["current_image_url"] = ""
+                state["current_caption"] = ""
+                send_line_message("✅ Instagramへの投稿が完了しました！")
+            else:
+                send_line_message(f"❌ 投稿に失敗しました。\nエラー内容：{error_msg}")
+            return
+        else:
+            send_line_message("投稿する写真がありません。写真を送ってください📸")
+            return
+
     # リセットコマンド（最優先・どの状態でも最初に戻る）
     if text in ["リセット", "やめる", "キャンセル", "最初から"]:
         state["waiting_for_memo"] = False
