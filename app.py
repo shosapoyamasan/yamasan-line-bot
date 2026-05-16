@@ -11,11 +11,14 @@
 
 import os
 import json
+import schedule
+import time
+import threading
 import requests
 import anthropic
+from datetime import datetime
 from flask import Flask, request, Response
 from dotenv import load_dotenv
-# scheduleとthreadingは不要（GitHub Actionsでスケジュール管理）
 
 load_dotenv()
 
@@ -25,16 +28,18 @@ IG_ACCESS_TOKEN = os.getenv("IG_ACCESS_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID", "Ubacd4253590620330be7e9dc117d446b")
+IMGBB_API_KEY = os.getenv("IMGBB_API_KEY")
 
 app = Flask(__name__)
 
 # 会話の状態管理
 state = {
-    "waiting_for_memo": False,      # メモ待ち
-    "waiting_for_image": False,     # 画像URL待ち
-    "waiting_for_ok": False,        # OK待ち
-    "current_caption": "",          # 生成した投稿文
-    "current_memo": "",             # やまさんのメモ
+    "waiting_for_memo": False,
+    "waiting_for_image": False,
+    "waiting_for_ok": False,
+    "current_caption": "",
+    "current_memo": "",
+    "last_post_time": None,         # 最後にInstagram投稿した時刻
 }
 
 
@@ -57,43 +62,7 @@ def send_line_message(text: str):
     return res
 
 
-def generate_post_text_from_image(image_url: str) -> str:
-    """写真を見てInstagram投稿文をAIで生成"""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    system_prompt = """あなたはやまさん（山崎清治）のSNS投稿文を作成するアシスタントです。
-
-やまさんのプロフィール：
-- 教育・啓発活動の専門家・講演者
-- NPO法人「SHOSAPO（ショサポ）」代表
-- ハッシュタグは必ず「#SHOSAPO」（アルファベット大文字）を使う
-
-投稿文のルール：
-- 写真の内容から活動・場所・状況を読み取って投稿文を作る
-- 感情はシンプルに一言だけ
-- 意識高い系・自己啓発っぽい表現は絶対に使わない
-- 150〜250文字程度
-- 末尾に関連するハッシュタグを5〜8個（#SHOSAPO を必ず含める）
-- 「臭い」「いきってる」と感じるような表現は使わない"""
-
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "url", "url": image_url}},
-                {"type": "text", "text": "この写真をもとにInstagram投稿文を作成してください。"}
-            ]
-        }]
-    )
-    return message.content[0].text
-
-
-def generate_post_text(memo: str) -> str:
-    """AIで投稿文を生成"""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    system_prompt = """あなたはやまさん（山崎清治）のSNS投稿文を作成するアシスタントです。
+SYSTEM_PROMPT = """あなたはやまさん（山崎清治）のSNS投稿文を作成するアシスタントです。
 
 やまさんのプロフィール：
 - 教育・啓発活動の専門家・講演者
@@ -113,11 +82,39 @@ def generate_post_text(memo: str) -> str:
 - 末尾に関連するハッシュタグを5〜8個つける（#SHOSAPO を必ず含める、#ショサポや#シャオサポは絶対に使わない）
 - 「臭い」「いきってる」と感じるような表現は使わない"""
 
+
+def generate_post_text(memo: str) -> str:
+    """テキストメモからAIで投稿文を生成"""
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=system_prompt,
+        system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": f"以下のメモをもとにInstagram投稿文を作成してください：\n\n{memo}"}]
+    )
+    return message.content[0].text
+
+
+def generate_post_text_from_image(image_url: str) -> str:
+    """写真の内容からAIで投稿文を生成（画像認識）"""
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "url", "url": image_url}
+                },
+                {
+                    "type": "text",
+                    "text": "この写真の内容をもとに、やまさんのInstagram投稿文を作成してください。写真から読み取れる場所・状況・雰囲気を活かして書いてください。"
+                }
+            ]
+        }]
     )
     return message.content[0].text
 
@@ -139,7 +136,7 @@ def download_line_image(message_id: str) -> str:
     image_b64 = base64.b64encode(res.content).decode("utf-8")
     imgbb_res = requests.post(
         "https://api.imgbb.com/1/upload",
-        data={"key": os.getenv("IMGBB_API_KEY", "da96db4d1b87398aeddabec81ab6d498"), "image": image_b64}
+        data={"key": IMGBB_API_KEY, "image": image_b64}
     )
     if imgbb_res.status_code == 200:
         url = imgbb_res.json()["data"]["url"]
@@ -164,27 +161,35 @@ def revise_post_text(current_caption: str, instruction: str) -> str:
     return message.content[0].text
 
 
-def post_to_instagram(image_url: str, caption: str) -> bool:
-    """Instagramに投稿"""
-    base_url = f"https://graph.instagram.com/v21.0/{IG_USER_ID}"
-    try:
-        container_res = requests.post(
-            f"{base_url}/media",
-            data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN}
-        )
-        container_res.raise_for_status()
-        container_id = container_res.json()["id"]
+MAKE_WEBHOOK_URL = "https://hook.us2.make.com/1gapcfs998uqcn3ypflv8jlsk9to5ktv"
 
-        publish_res = requests.post(
-            f"{base_url}/media_publish",
-            data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN}
+def post_to_instagram(image_url: str, caption: str) -> str:
+    """Make.com経由でInstagramに投稿。成功時は空文字、失敗時はエラーメッセージを返す"""
+    try:
+        res = requests.post(
+            MAKE_WEBHOOK_URL,
+            json={
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": IG_ACCESS_TOKEN
+            },
+            timeout=30
         )
-        publish_res.raise_for_status()
-        print(f"✅ Instagram投稿完了: {publish_res.json()['id']}")
-        return True
+        if res.ok:
+            data = res.json() if res.text else {}
+            if data.get("error"):
+                msg = data["error"]
+                print(f"❌ Make.com Instagram投稿失敗: {msg}")
+                return msg
+            print(f"✅ Make.com経由でInstagram投稿完了")
+            return ""
+        else:
+            msg = res.text[:200]
+            print(f"❌ Make.com呼び出し失敗: {res.status_code} {msg}")
+            return f"Make.comエラー({res.status_code}): {msg}"
     except Exception as e:
-        print(f"❌ Instagram投稿エラー: {e}")
-        return False
+        print(f"❌ Make.com呼び出しエラー: {e}")
+        return str(e)
 
 
 def ask_yamasan():
@@ -203,6 +208,17 @@ def trigger_ask():
     return Response("問いかけ送信完了", status=200)
 
 
+@app.route("/reset", methods=["GET"])
+def reset_state():
+    state["waiting_for_memo"] = False
+    state["waiting_for_image"] = False
+    state["waiting_for_ok"] = False
+    state["current_caption"] = ""
+    state["current_memo"] = ""
+    send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+    return Response("リセット完了", status=200)
+
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -218,26 +234,26 @@ def webhook():
                     handle_message(text)
                 elif event["message"]["type"] == "image":
                     message_id = event["message"]["id"]
-                    send_line_message("画像を受信しました！処理中...📤")
+                    send_line_message("画像を受信しました！アップロード中...📤")
                     image_url = download_line_image(message_id)
-                    if image_url:
-                        if state["waiting_for_image"]:
-                            # テキストメモ済み→画像だけ受け取る
-                            state["waiting_for_image"] = False
-                            state["current_image_url"] = image_url
-                            state["waiting_for_ok"] = True
-                            send_line_message(f"アップロード完了！\n\nこの内容でInstagramに投稿しますか？\n「OK」で投稿、「もう一度」で文章を再生成します")
-                        else:
-                            # 写真だけ送られた→写真を見て文章を自動生成
-                            state["current_image_url"] = image_url
-                            send_line_message("写真から投稿文を生成中です...📝")
-                            caption = generate_post_text_from_image(image_url)
-                            state["current_caption"] = caption
-                            state["waiting_for_image"] = False
-                            state["waiting_for_ok"] = True
-                            send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n「OK」で投稿、「もう一度」で再生成、「修正して→○○」で修正できます")
-                    else:
+                    if not image_url:
                         send_line_message("画像のアップロードに失敗しました。もう一度送ってください")
+                    elif state["waiting_for_image"]:
+                        # テキストメモ済みで写真待ちの場合
+                        state["waiting_for_image"] = False
+                        state["current_image_url"] = image_url
+                        state["waiting_for_ok"] = True
+                        send_line_message(f"アップロード完了！\n\nこの内容でInstagramに投稿しますか？\n「OK」で投稿、「もう一度」で文章を再生成します")
+                    else:
+                        # 写真だけ送ってきた場合 → 画像認識でキャプション生成
+                        send_line_message("写真から投稿文を生成中です...少し待ってください📝")
+                        caption = generate_post_text_from_image(image_url)
+                        state["current_caption"] = caption
+                        state["current_memo"] = ""
+                        state["current_image_url"] = image_url
+                        state["waiting_for_image"] = False
+                        state["waiting_for_ok"] = True
+                        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\nこの内容でInstagramに投稿しますか？\n「OK」で投稿、「もう一度」で再生成、「修正して→○○」で修正できます")
     except Exception as e:
         print(f"エラー: {e}")
 
@@ -248,6 +264,16 @@ def handle_message(text: str):
     """やまさんからのメッセージを処理"""
     print(f"受信: {text}")
 
+    # リセットコマンド（最優先・どの状態でも最初に戻る）
+    if text in ["リセット", "やめる", "キャンセル", "最初から"]:
+        state["waiting_for_memo"] = False
+        state["waiting_for_image"] = False
+        state["waiting_for_ok"] = False
+        state["current_caption"] = ""
+        state["current_memo"] = ""
+        send_line_message("リセットしました！\nいつでもメモや写真を送ってください📸")
+        return
+
     # メモ待ちの場合 → 投稿文を生成
     if state["waiting_for_memo"]:
         state["waiting_for_memo"] = False
@@ -256,7 +282,7 @@ def handle_message(text: str):
         caption = generate_post_text(text)
         state["current_caption"] = caption
         state["waiting_for_image"] = True
-        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n画像のURLを送ってください\n（ImgBBなどで公開したURLを貼り付けてください）")
+        send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n写真をLINEで送ってください📸\n「もう一度」で再生成、「修正して→○○」で修正できます")
         return
 
     # 画像URL待ちの場合
@@ -294,11 +320,12 @@ def handle_message(text: str):
         if text.upper() in ["OK", "ＯＫ", "ok", "おけ", "オケ"]:
             state["waiting_for_ok"] = False
             send_line_message("投稿中です...📸")
-            success = post_to_instagram(state["current_image_url"], state["current_caption"])
-            if success:
+            error_msg = post_to_instagram(state["current_image_url"], state["current_caption"])
+            if not error_msg:
+                state["last_post_time"] = datetime.now()
                 send_line_message("✅ Instagramへの投稿が完了しました！")
             else:
-                send_line_message("❌ 投稿に失敗しました。もう一度試してください")
+                send_line_message(f"❌ 投稿に失敗しました。\nエラー内容：{error_msg}")
         elif text in ["もう一度", "再生成", "やり直し"]:
             send_line_message("投稿文を再生成中です...")
             caption = generate_post_text(state["current_memo"])
@@ -312,18 +339,39 @@ def handle_message(text: str):
             send_line_message(f"【修正された投稿文】\n\n{caption}\n\n---\n「OK」で投稿、「修正して→○○」でさらに修正")
         return
 
-    # その他のメッセージ → そのままメモとして投稿文を生成
+    # その他のメッセージ → いつでもメモとして受け付ける
+    state["waiting_for_memo"] = False
     state["current_memo"] = text
     send_line_message("投稿文を生成中です...少し待ってください📝")
     caption = generate_post_text(text)
     state["current_caption"] = caption
     state["waiting_for_image"] = True
-    state["waiting_for_ok"] = False
     send_line_message(f"【生成された投稿文】\n\n{caption}\n\n---\n写真をLINEで送ってください📸\n「もう一度」で再生成、「修正して→○○」で修正できます")
 
 
+def check_and_remind():
+    """最後の投稿から10時間経過していたら問いかけを送る"""
+    last = state.get("last_post_time")
+    if last is None:
+        return
+    hours_since = (datetime.now() - last).total_seconds() / 3600
+    if hours_since >= 10:
+        ask_yamasan()
+
+
+def run_scheduler():
+    """30分ごとに投稿間隔をチェック"""
+    schedule.every(30).minutes.do(check_and_remind)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+
+# gunicornでも動くようにモジュールレベルでスケジューラーを起動
+scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+scheduler_thread.start()
 print("=== やまさんLINE Bot起動 ===")
-print("スケジュールはGitHub Actionsが管理します")
+print("朝8時30分・夕方17時に問いかけを送信します")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
