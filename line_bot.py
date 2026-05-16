@@ -181,6 +181,21 @@ def post_to_instagram(image_url: str, caption: str) -> str:
         if not container_id:
             return f"コンテナIDが取得できませんでした: {res1.text[:200]}"
 
+        # Instagramが画像を処理するまで待つ（最大30秒）
+        for _ in range(6):
+            time.sleep(5)
+            status_res = requests.get(
+                f"https://graph.instagram.com/v21.0/{container_id}",
+                params={"fields": "status_code", "access_token": IG_ACCESS_TOKEN},
+                timeout=10
+            )
+            status = status_res.json().get("status_code", "")
+            print(f"コンテナ状態: {status}")
+            if status == "FINISHED":
+                break
+            if status == "ERROR":
+                return "Instagram画像処理エラー。別の写真で試してください。"
+
         # Step2: 投稿公開
         res2 = requests.post(
             f"{base_url}/media_publish",
