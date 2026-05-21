@@ -215,6 +215,18 @@ def post_to_instagram(image_url: str, caption: str) -> str:
         return str(e)
 
 
+@app.route("/linetest", methods=["GET"])
+def line_test():
+    """LINE API接続テスト"""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+    }
+    data = {"to": LINE_USER_ID, "messages": [{"type": "text", "text": "LINE接続テスト"}]}
+    res = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=data)
+    return Response(f"status={res.status_code} body={res.text}", status=200)
+
+
 def ask_yamasan():
     """やまさんに問いかけを送る"""
     state["waiting_for_memo"] = True
