@@ -290,6 +290,23 @@ def line_test():
     return Response(f"status={res.status_code} body={res.text}", status=200)
 
 
+def auto_refresh_token():
+    """Instagramトークンを自動更新（有効期限の10日前に実行）"""
+    global IG_ACCESS_TOKEN
+    res = requests.get(
+        "https://graph.instagram.com/refresh_access_token",
+        params={"grant_type": "ig_refresh_token", "access_token": IG_ACCESS_TOKEN},
+        timeout=10
+    )
+    data = res.json()
+    if "access_token" in data:
+        IG_ACCESS_TOKEN = data["access_token"]
+        print(f"✅ トークン自動更新成功")
+    else:
+        print(f"⚠️ トークン自動更新失敗: {data}")
+        push("⚠️ Instagramトークンの自動更新に失敗しました。\nMetaで新しいトークンを発行してRenderに設定してください。")
+
+
 def check_24h_notify():
     last = state.get("last_post_time")
     if not last:
@@ -304,9 +321,15 @@ def check_24h_notify():
     push("今日はまだ投稿していませんね。\nいつでもメモや写真を送ってください📸")
 
 
-threading.Thread(target=lambda: [schedule.every(1).hours.do(check_24h_notify),
-                                  [schedule.run_pending() or time.sleep(60) for _ in iter(int, 1)]],
-                 daemon=True).start()
+def run_scheduler():
+    schedule.every(1).hours.do(check_24h_notify)
+    schedule.every(50).days.do(auto_refresh_token)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+
+threading.Thread(target=run_scheduler, daemon=True).start()
 
 print("=== やまさんLINE Bot起動 ===")
 
