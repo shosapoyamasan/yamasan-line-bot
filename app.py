@@ -257,6 +257,26 @@ def handle_image(message_id: str, rt: str):
         reply(rt, f"【生成された投稿文】\n\n{caption}\n\n「OK」で投稿、「もう一度」で再生成、「修正して→○○」で修正")
 
 
+@app.route("/refresh_token", methods=["GET"])
+def refresh_token_endpoint():
+    """Instagramアクセストークンを更新"""
+    res = requests.get(
+        "https://graph.instagram.com/refresh_access_token",
+        params={"grant_type": "ig_refresh_token", "access_token": IG_ACCESS_TOKEN},
+        timeout=10
+    )
+    data = res.json()
+    if "access_token" in data:
+        return Response(
+            f"✅ 新しいトークン:\n{data['access_token']}\n\n有効期限: {data.get('expires_in', '?')}秒",
+            status=200, content_type="text/plain; charset=utf-8"
+        )
+    return Response(
+        f"❌ 更新失敗:\n{json.dumps(data, ensure_ascii=False, indent=2)}",
+        status=400, content_type="text/plain; charset=utf-8"
+    )
+
+
 @app.route("/reset", methods=["GET"])
 def reset_endpoint():
     state.update({"waiting_for_image": False, "waiting_for_ok": False,
